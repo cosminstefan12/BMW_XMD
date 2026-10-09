@@ -1,47 +1,90 @@
-const { default: makeWASocket, useMultiFileAuthState, DisconnectReason, fetchLatestBaileysVersion, makeCacheableSignalKeyStore } = require('@whiskeysockets/baileys');
-const pino = require('pino');
-const readline = require('readline');
+const { Client, LocalAuth } = require('whatsapp-web.js');
+const qrcode = require('qrcode-terminal');
 
-const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
-const question = (text) => new Promise((resolve) => rl.question(text, resolve));
+const client = new Client({
+    authStrategy: new LocalAuth()
+});
 
-async function startBot() {
-    const { state, saveCreds } = await useMultiFileAuthState('auth_info');
-    const { version } = await fetchLatestBaileysVersion();
+client.on('qr', (qr) => {
+    qrcode.generate(qr, { small: true });
+    console.log('Scanează acest cod QR cu aplicația WhatsApp!');
+});
 
-    const sock = makeWASocket({
-        version,
-        logger: pino({ level: 'silent' }),
-        auth: {
-            creds: state.creds,
-            keys: makeCacheableSignalKeyStore(state.keys, pino({ level: 'silent' }))
-        },
-        printQRInTerminal: false,
-        browser: ["BMW_XMD", "Chrome", "10.0.0"]
-    });
+client.on('ready', () => {
+    console.log('Botul este gata!');
+});
 
-    if (!sock.authState.creds.registered) {
-        const phoneNumber = await question('Introdu numarul tau de WhatsApp (ex: 407xxxxxxxx): ');
-        let code = await sock.requestPairingCode(phoneNumber.trim());
-        code = code?.match(/.{1,4}/g)?.join('-') || code;
-        console.log(`\n========================================`);
-        console.log(`🔑 CODUL TAU DE IMPERECHERE: ${code}`);
-        console.log(`========================================\n`);
+client.on('message', async (message) => {
+    // Meniu principal
+    if (message.body === '.meniu') {
+        await message.reply(
+            '*Meniu Bot:*\n' +
+            '1. .fun - Comenzi amuzante\n' +
+            '2. .grup - Comenzi pentru grup\n' +
+            '3. .jocuri - Jocuri simple\n'
+        );
     }
 
-    sock.ev.on('connection.update', (update) => {
-        const { connection, lastDisconnect } = update;
-        if (connection === 'close') {
-            const shouldReconnect = (lastDisconnect.error)?.output?.statusCode !== DisconnectReason.loggedOut;
-            if (shouldReconnect) {
-                startBot();
-            }
-        } else if (connection === 'open') {
-            console.log('🎉 BMW_XMD s-a conectat cu succes la WhatsApp!');
+    // Comenzi fun
+    if (message.body === '.fun') {
+        await message.reply(
+            '*Comenzi Fun:*\n' +
+            '- .banc - Banc random\n' +
+            '- .meme - Meme random\n'
+        );
+    }
+    if (message.body === '.banc') {
+        const bancuri = [
+            '– De ce râde pisica? – Pentru că a citit o glumă MIAUră!',
+            '– Ce face un matematician la plajă? Își calculează valurile!',
+            'Doctorul către pacient: – Aveți o viață sedentară? – Nu, am doar Netflix.'
+        ];
+        const random = bancuri[Math.floor(Math.random() * bancuri.length)];
+        await message.reply(random);
+    }
+
+    // Comenzi de grup
+    if (message.body === '.grup') {
+        await message.reply(
+            '*Comenzi Grup:*\n' +
+            '- .numar [tag] - Afișează numărul unui membru\n' +
+            '- .tagall - Dă tag la tot grupul\n'
+        );
+    }
+
+    if (message.body === '.tagall' && message.from.includes('-')) { // doar în grupuri
+        let chat = await message.getChat();
+        let text = '';
+        for (let participant of chat.participants) {
+            text += `@${participant.id.user} `;
         }
-    });
+        chat.sendMessage(text, { mentions: chat.participants.map(p => p.id) });
+    }
 
-    sock.ev.on('creds.update', saveCreds);
-}
+    // Jocuri simple
+    if (message.body === '.jocuri') {
+        await message.reply(
+            '*Jocuri:*\n' +
+            '- .ghiceste - Ghiceste numărul între 1-10\n'
+        );
+    }
 
-startBot();
+    if (message.body === '.ghiceste') {
+        const numar = Math.floor(Math.random() * 10) + 1;
+        await message.reply('Am ales un număr între 1 și 10. Răspunde cu ".rasp [număr]"!');
+        client.once('message', async m => {
+            if (m.body.startsWith('.rasp')) {
+                const guess = parseInt(m.body.split(' ')[1]);
+                if (guess === numar) {
+                    await m.reply('Felicitări! Ai ghicit!');
+                } else {
+                    await m.reply(`Nu ai ghicit. Numărul era ${numar}.`);
+                }
+            }
+        });
+    }
+});
+
+client.initialize();
+
+
