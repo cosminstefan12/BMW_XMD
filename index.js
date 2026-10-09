@@ -1,90 +1,92 @@
-const { Client, LocalAuth } = require('whatsapp-web.js');
-const qrcode = require('qrcode-terminal');
+const { default: makeWASocket, useMultiFileAuthState, DisconnectReason, fetchLatestBaileysVersion, makeCacheableSignalKeyStore } = require('@whiskeysockets/baileys');
+const pino = require('pino');
+const readline = require('readline');
 
-const client = new Client({
-    authStrategy: new LocalAuth()
-});
+const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
+const question = (text) => new Promise((resolve) => rl.question(text, resolve));
 
-client.on('qr', (qr) => {
-    qrcode.generate(qr, { small: true });
-    console.log('Scanează acest cod QR cu aplicația WhatsApp!');
-});
+async function startBot() {
+    const { state, saveCreds } = await useMultiFileAuthState('auth_info');
+    const { version } = await fetchLatestBaileysVersion();
 
-client.on('ready', () => {
-    console.log('Botul este gata!');
-});
+    const sock = makeWASocket({
+        version,
+        logger: pino({ level: 'silent' }),
+        auth: {
+            creds: state.creds,
+            keys: makeCacheableSignalKeyStore(state.keys, pino({ level: 'silent' }))
+        },
+        printQRInTerminal: false,
+        browser: ["BMW_XMD", "Chrome", "10.0.0"]
+    });
 
-client.on('message', async (message) => {
-    // Meniu principal
-    if (message.body === '.meniu') {
-        await message.reply(
-            '*Meniu Bot:*\n' +
-            '1. .fun - Comenzi amuzante\n' +
-            '2. .grup - Comenzi pentru grup\n' +
-            '3. .jocuri - Jocuri simple\n'
-        );
+    if (!sock.authState.creds.registered) {
+        const phoneNumber = await question('Introdu numărul tău de WhatsApp (ex: 407xxxxxxxx): ');
+        let code = await sock.requestPairingCode(phoneNumber.trim());
+        code = code?.match(/.{1,4}/g)?.join('-') || code;
+        console.log(`\n========================================`);
+        console.log(`🔑 CODUL TĂU DE ÎMPERECHERE: ${code}`);
+        console.log(`========================================\n`);
     }
 
-    // Comenzi fun
-    if (message.body === '.fun') {
-        await message.reply(
-            '*Comenzi Fun:*\n' +
-            '- .banc - Banc random\n' +
-            '- .meme - Meme random\n'
-        );
-    }
-    if (message.body === '.banc') {
-        const bancuri = [
-            '– De ce râde pisica? – Pentru că a citit o glumă MIAUră!',
-            '– Ce face un matematician la plajă? Își calculează valurile!',
-            'Doctorul către pacient: – Aveți o viață sedentară? – Nu, am doar Netflix.'
-        ];
-        const random = bancuri[Math.floor(Math.random() * bancuri.length)];
-        await message.reply(random);
-    }
-
-    // Comenzi de grup
-    if (message.body === '.grup') {
-        await message.reply(
-            '*Comenzi Grup:*\n' +
-            '- .numar [tag] - Afișează numărul unui membru\n' +
-            '- .tagall - Dă tag la tot grupul\n'
-        );
-    }
-
-    if (message.body === '.tagall' && message.from.includes('-')) { // doar în grupuri
-        let chat = await message.getChat();
-        let text = '';
-        for (let participant of chat.participants) {
-            text += `@${participant.id.user} `;
-        }
-        chat.sendMessage(text, { mentions: chat.participants.map(p => p.id) });
-    }
-
-    // Jocuri simple
-    if (message.body === '.jocuri') {
-        await message.reply(
-            '*Jocuri:*\n' +
-            '- .ghiceste - Ghiceste numărul între 1-10\n'
-        );
-    }
-
-    if (message.body === '.ghiceste') {
-        const numar = Math.floor(Math.random() * 10) + 1;
-        await message.reply('Am ales un număr între 1 și 10. Răspunde cu ".rasp [număr]"!');
-        client.once('message', async m => {
-            if (m.body.startsWith('.rasp')) {
-                const guess = parseInt(m.body.split(' ')[1]);
-                if (guess === numar) {
-                    await m.reply('Felicitări! Ai ghicit!');
-                } else {
-                    await m.reply(`Nu ai ghicit. Numărul era ${numar}.`);
-                }
+    sock.ev.on('connection.update', (update) => {
+        const { connection, lastDisconnect } = update;
+        if (connection === 'close') {
+            const shouldReconnect = (lastDisconnect.error)?.output?.statusCode !== DisconnectReason.loggedOut;
+            if (shouldReconnect) {
+                startBot();
             }
-        });
-    }
-});
+        } else if (connection === 'open') {
+            console.log('🎉 BMW_XMD s-a conectat cu succes la WhatsApp!');
+        }
+    });
 
-client.initialize();
+    sock.ev.on('creds.update', saveCreds);
 
+    sock.ev.on('messages.upsert', async (chatUpdate) => {
+        try {
+            const mek = chatUpdate.messages[0];
+            if (!mek.message) return;
+            if (mek.key.fromMe) return;
 
+            const messageType = Object.keys(mek.message)[0];
+            const body = (messageType === 'conversation') ? mek.message.conversation :
+                         (messageType == 'imageMessage') ? mek.message.imageMessage.caption : '';
+
+            const prefix = '.';
+            if (!body.startsWith(prefix)) return;
+
+            const args = body.slice(prefix.length).trim().split(/ +/);
+            const command = args.shift().toLowerCase();
+
+            if (command === 'ping') {
+                await sock.sendMessage(mek.key.remoteJid, { text: 'Pong! BMW_XMD este activ 🚀' }, { quoted: mek });
+            } 
+            else if (command === 'alive') {
+                const aliveText = `━━━━━━ 🤖 ʙᴏᴛ ɪɴғᴏ ━━━━━━\n◉ 🎉 ꨄ BMW_XMD ꨄ\n◉ 👑 ᴏᴡɴᴇʀ: Cosmin\n◉ ⏱️ sᴛᴀᴛᴜs: Online & Activ\n◉ 📦 ᴘʀᴇғɪx: .\n┗━━━━━━━━━━━━━━`;
+                await sock.sendMessage(mek.key.remoteJid, { text: aliveText }, { quoted: mek });
+            }
+            else if (command === 'menu' || command === 'help') {
+                const menuText = `
+╭━━━〔 🤖 *BMW_XMD* 🤖 〕━━━
+┃ 
+┃ 👑 *Owner:* Cosmin
+┃ ⏱️ *Status:* Online & Activ
+┃ 📦 *Prefix:* .
+┃
+┣━━━〔 📂 *CATEGORII* 〕━━━
+┃ ➢ .menu ai
+┃ ➢ .menu downloader
+┃ ➢ .menu fun
+┃ ➢ .menu owner
+┃
+╰━━━━━━━━━━━━━━━━━━━`.trim();
+                await sock.sendMessage(mek.key.remoteJid, { text: menuText }, { quoted: mek });
+            }
+        } catch (err) {
+            console.error('Erore:', err);
+        }
+    });
+}
+
+startBot();
