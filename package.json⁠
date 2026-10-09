@@ -1,0 +1,19 @@
+{
+  "name": "bmw-xmd",
+  "version": "18.2.2",
+  "description": "WhatsApp Bot Modular",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js"
+  },
+  "dependencies": {
+    "@whiskeysockets/baileys": "latest",
+    "@hapi/boom": "latest",
+    "pino": "latest",
+    "axios": "latest",
+    "chalk": "latest",
+    "file-type": "latest",
+    "form-data": "latest",
+    "node-fetch": "latest"
+  }
+}
