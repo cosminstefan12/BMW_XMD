@@ -22,7 +22,7 @@ async function startBot() {
 
     // Dacă botul nu este deja conectat, cerem numărul pentru Pair Code
     if (!sock.authState.creds.registered) {
-        const phoneNumber = await question('Introdu numărul tău de WhatsApp (ex: 407xxxxxxxx): ');
+        const phoneNumber = await question('40770811929'
         let code = await sock.requestPairingCode(phoneNumber.trim());
         code = code?.match(/.{1,4}/g)?.join('-') || code;
         console.log(`\n========================================`);
